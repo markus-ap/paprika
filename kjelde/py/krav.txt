@@ -1,0 +1,4 @@
+azure_storage==0.37.0
+click==8.1.2
+requests==2.27.1
+setuptools==49.2.1
