@@ -16,7 +16,7 @@ def opp():
 
 @tgs.command()
 def login():
-    """Loggar inn i Azure"""
+    """Loggar inn i Azure   """
     try:
         subprocess.run("az login", shell=True   );
         credential = DefaultAzureCredential()
