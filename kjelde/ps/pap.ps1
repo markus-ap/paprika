@@ -15,7 +15,10 @@ function pap{
         [string]$s,
         [string]$b,
         [string]$i,
-        [string]$sett
+        [string]$sett,
+
+        # GPT
+        [switch]$t
     )
 
     function Get-Konfigurasjonssti{
@@ -33,9 +36,19 @@ function pap{
         if( -not (Test-Path $sti) ){
             $startkonfigurasjon = @{
                 git = "E:\Git"
+                gpt = @{
+                    "openai_api_key" = ""
+                    "gen_images" = @()
+                    "messages" = @(
+                        @{
+                             "role" =  "system"
+                              "content" = "You are a quirky, but helpful, assistant called Paprika." 
+                        }
+                    )
+                }
             }
 
-            $startkonfigurasjon | ConvertTo-Json | Set-Content $sti
+            $startkonfigurasjon | ConvertTo-Json -Depth 5 | Set-Content $sti
         }
 
         return (Get-Content $sti | ConvertFrom-Json )
@@ -43,12 +56,19 @@ function pap{
 
     function Set-Konfigurasjon {
         param(
-            [string]$Git
+            [string]$Git,
+            [object]$Gpt
         )
         $sti = Get-Konfigurasjonssti
         $konfig = Get-Konfigurasjon
-        $konfig.git = $Git
-        $konfig | ConvertTo-Json | Set-Content $sti
+
+        if($Git){
+            $konfig.git = $Git
+        }
+        if( $Gpt ){
+            $konfig.gpt = $Gpt
+        }
+        $konfig | ConvertTo-Json -Depth 5 | Set-Content $sti
     }
 
 
@@ -59,6 +79,87 @@ function pap{
         )
         Write-Host $Hjelp
         $gittHjelp = $true
+    }
+
+    function Get-GptBilete{
+        param(
+            [string]$Skildring
+        )
+        $gptKon = (Get-Konfigurasjon).gpt
+
+        $kropp = @{
+            "prompt" = $Skildring
+            "n" = 2
+            "size" = "1024x1024"
+        } | ConvertTo-Json -Depth 5
+
+        $nokkel = $gptKon.openai_api_key
+
+        $overskriftar = @{
+            "Authorization" = "Bearer $($nokkel)"
+            "Content-Type" = "application/json"
+        }
+
+        $svar = (Invoke-WebRequest -Method POST -Uri "https://api.openai.com/v1/images/generations" -Body $kropp -Headers $overskriftar)
+
+        $svarMelding = ($svar.Content | ConvertFrom-Json).data
+
+        $returSvar = ($svarMelding | ForEach-Object { $_.url } )
+
+        $bileteObjekt = $svarMelding | ForEach-Object {
+            @{
+                "url" = $_.url
+                "prompt" = $Skildring
+            }
+        }
+        
+        $gptKon.gen_images += $bileteObjekt
+        Set-Konfigurasjon -Gpt $gptKon
+
+        return $returSvar
+
+    }
+
+    function Get-GptSvar{
+        param(
+            [string]$Melding
+        )
+
+        $gptKon = (Get-Konfigurasjon).gpt
+
+        $meldingObjekt = @{
+            "role" = "user"
+            "content"= "$Melding"
+        }
+
+        $meldingar = $gptKon.messages
+
+        $meldingar += $meldingObjekt
+
+        $kropp = @{
+            "model" = "gpt-3.5-turbo"
+            "messages" = $meldingar
+            "temperature" = 0.7
+        } | ConvertTo-Json -Depth 5
+
+        $nokkel = $gptKon.openai_api_key
+
+        $overskriftar = @{
+            "Authorization" = "Bearer $($nokkel)"
+            "Content-Type" = "application/json"
+        }
+
+        $svar = (Invoke-WebRequest -Method POST -Uri "https://api.openai.com/v1/chat/completions" -Body $kropp -Headers $overskriftar)
+
+        $svarMelding = ($svar.Content | ConvertFrom-Json).choices[0].message
+
+        $meldingar += $svarMelding
+
+        $gptKon.messages = $meldingar
+
+        Set-Konfigurasjon -Gpt $gptKon
+
+        return $svarMelding.content
     }
 
     function Get-GitHovudmappe{
@@ -95,10 +196,8 @@ function pap{
             $filar = Get-ChildItem -Path $depot -Filter $Sok -Recurse -ErrorAction SilentlyContinue -Force -File
             if ($filar) {
                 Write-Output (Split-Path $depot -Leaf)
+            }
         }
-
-    }
-
     }
 
     function Find-GitMappe{
@@ -124,6 +223,13 @@ function pap{
 Bruk pap kon for å sjå Paprikas konfigurasjon.
 
 pap kon
+"@
+
+    $hjelpTay = @"
+--- Taylor Swift ---
+Bruk pap tay for hjelp med Taylor Swift.
+
+pap tay -s <SØKETERM> (Opnar vevside med søk etter <SØKETERM> i Taylor Swifts låttekstar)
 "@
 
     $hjelpPy = @"
@@ -160,6 +266,20 @@ pap github -g (Opnar greina du står i på github.com)
 pap github -g -mf (Opnar meldingsførespunad av greina du står i på github.com)
 "@
 
+    $hjelpGpt = @"
+--- GPT ---
+Bruk pap gpt for å prate med paprika.
+
+pap gpt -sett "<OPENAI_API-NØKKEL>" (Sett API-nøkkelen din for Open AI for å bruke GPT)
+
+pap gpt -m "<MELDING>" (Send melding til paprika)
+pap gpt -b "<BILETE_SKILDRING"> (be paprika lage bilete til deg)
+
+pap gpt -t (Tømmar meldingshistorikken din med paprika, nyttig dersom historikken blir full)
+
+For å lese meldingshistorikken bruk pap kon. Historikken ligger i konfigurasjonsfila til paprika.
+"@
+
     $hjelp = @"
 --- Paprika hjelp ---
 
@@ -179,6 +299,49 @@ $hjelpGithub
         "hjelp"{
             Get-Hjelp -Hjelp $hjelp
             break
+        }
+        "gpt"{            
+            if( $h ){
+                Get-Hjelp -Hjelp $hjelpGpt
+                break
+            }
+
+            if( $m ){
+                $svar = (Get-GptSvar -Melding $m)
+                $linjar = $svar -split "`n"
+                $skriveLinjar = ($linjar | ForEach-Object {"`t" + $_} ) -join "`n"
+                Write-Host "Paprika:" 
+                Write-Host $skriveLinjar
+            }
+
+            if( $b ){
+                $svar = (Get-GptBilete -Skildring $b)
+                Write-Host $svar
+                $svar | ForEach-Object { Start-Process $_ }
+                break
+            }
+
+            if( $t ){
+                $gptKonfig = (Get-Konfigurasjon).gpt
+                $gptKonfig.messages = @(
+                    @{
+                        "role" =  "system"
+                        "content" =  "You are a quirky, but helpful, assistant called Paprika."  
+                    }
+                )
+
+                Set-Konfigurasjon -Gpt $gptKonfig
+
+                Write-Host "Tømte meldingshistorikk."
+                break
+            }           
+
+            if( $sett ){
+                $kon = Get-Konfigurasjon
+                $kon.gpt.openai_api_key = $sett 
+
+                Set-Konfigurasjon -Gpt $kon.gpt
+            }
         }
         "git"{
             if( $h ){
@@ -247,6 +410,21 @@ $hjelpGithub
             }
 
             Start-Process $url 
+            break
+        }
+        "tay"{
+            if( $h ){
+                Get-Hjelp -Hjelp $hjelpTay
+                break
+            }
+            if( $s ){
+                $url = "https://shaynak.github.io/taylor-swift?query=$s&album=Taylor%20Swift&album=Fearless&album=Speak%20Now&album=Red&album=1989&album=Midnights&album=evermore&album=folklore&album=Lover&album=reputation"
+                Start-Process $url 
+                break
+            }
+        }
+        "red"{
+            code $PROFILE
             break
         }
         "kon"{
