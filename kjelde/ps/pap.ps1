@@ -15,7 +15,10 @@ function pap{
         [string]$s,
         [string]$b,
         [string]$i,
-        [string]$sett
+        [string]$sett,
+
+        # GPT
+        [switch]$t
     )
 
     function Get-Konfigurasjonssti{
@@ -33,7 +36,16 @@ function pap{
         if( -not (Test-Path $sti) ){
             $startkonfigurasjon = @{
                 git = "E:\Git"
-                gpt = @{}
+                gpt = @{
+                    "openai_api_key" = ""
+                    "gen_images" = @()
+                    "messages" = @(
+                        @{
+                             "role" =  "system"
+                              "content" = "You are a quirky, but helpful, assistant called Paprika." 
+                        }
+                    )
+                }
             }
 
             $startkonfigurasjon | ConvertTo-Json -Depth 5 | Set-Content $sti
@@ -94,7 +106,15 @@ function pap{
 
         $returSvar = ($svarMelding | ForEach-Object { $_.url } )
 
-        # TODO: Save image URLs to config so we don't lose them
+        $bileteObjekt = $svarMelding | ForEach-Object {
+            @{
+                "url" = $_.url
+                "prompt" = $Skildring
+            }
+        }
+        
+        $gptKon.gen_images += $bileteObjekt
+        Set-Konfigurasjon -Gpt $gptKon
 
         return $returSvar
 
@@ -246,6 +266,20 @@ pap github -g (Opnar greina du står i på github.com)
 pap github -g -mf (Opnar meldingsførespunad av greina du står i på github.com)
 "@
 
+    $hjelpGpt = @"
+--- GPT ---
+Bruk pap gpt for å prate med paprika.
+
+pap gpt -sett "<OPENAI_API-NØKKEL>" (Sett API-nøkkelen din for Open AI for å bruke GPT)
+
+pap gpt -m "<MELDING>" (Send melding til paprika)
+pap gpt -b "<BILETE_SKILDRING"> (be paprika lage bilete til deg)
+
+pap gpt -t (Tømmar meldingshistorikken din med paprika, nyttig dersom historikken blir full)
+
+For å lese meldingshistorikken bruk pap kon. Historikken ligger i konfigurasjonsfila til paprika.
+"@
+
     $hjelp = @"
 --- Paprika hjelp ---
 
@@ -285,6 +319,28 @@ $hjelpGithub
                 Write-Host $svar
                 $svar | ForEach-Object { Start-Process $_ }
                 break
+            }
+
+            if( $t ){
+                $gptKonfig = (Get-Konfigurasjon).gpt
+                $gptKonfig.messages = @(
+                    @{
+                        "role" =  "system"
+                        "content" =  "You are a quirky, but helpful, assistant called Paprika."  
+                    }
+                )
+
+                Set-Konfigurasjon -Gpt $gptKonfig
+
+                Write-Host "Tømte meldingshistorikk."
+                break
+            }           
+
+            if( $sett ){
+                $kon = Get-Konfigurasjon
+                $kon.gpt.openai_api_key = $sett 
+
+                Set-Konfigurasjon -Gpt $kon.gpt
             }
         }
         "git"{
