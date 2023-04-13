@@ -21,12 +21,19 @@ function pap{
         [switch]$t
     )
 
+    function Get-Konfigmappe{
+        return (Join-Path -Path $env:APPDATA -ChildPath "paprika")
+    }
+
     function Get-Konfigurasjonssti{
-        $konfigMappe = Join-Path -Path $env:APPDATA -ChildPath "paprika"
+        $konfigMappe = (Get-Konfigmappe)
         $sti = Join-Path -Path $konfigMappe -ChildPath "konfigurasjon.json"
         
         if (-not (Test-Path $konfigMappe)) {
             New-Item -Path $konfigMappe -ItemType Directory
+
+            $biletesti = Join-Path -Path $konfigMappe -ChildPath "bilete"
+            New-Item -Path $biletesti -ItemType Directory
         }
         return $sti
     }
@@ -104,11 +111,19 @@ function pap{
 
         $svarMelding = ($svar.Content | ConvertFrom-Json).data
 
-        $returSvar = ($svarMelding | ForEach-Object { $_.url } )
-
+        $bileteMappe = Join-Path -Path (Get-Konfigmappe) -ChildPath "bilete"
+        
+        $webClient = New-Object System.Net.WebClient
+        
         $bileteObjekt = $svarMelding | ForEach-Object {
+            $biletenamn = [System.IO.Path]::GetRandomFileName() + ".png"
+            $outputPath = Join-Path $bileteMappe $biletenamn
+            Write-Host "Saving image to $outputPath"
+            $webClient.DownloadFile($_.url, $outputPath)
+
             @{
                 "url" = $_.url
+                "file_path" = $outputPath
                 "prompt" = $Skildring
             }
         }
@@ -116,8 +131,7 @@ function pap{
         $gptKon.gen_images += $bileteObjekt
         Set-Konfigurasjon -Gpt $gptKon
 
-        return $returSvar
-
+        return
     }
 
     function Get-GptSvar{
@@ -317,7 +331,7 @@ $hjelpGithub
             if( $b ){
                 $svar = (Get-GptBilete -Skildring $b)
                 Write-Host $svar
-                $svar | ForEach-Object { Start-Process $_ }
+                Invoke-Item (Join-Path -Path (Get-Konfigmappe) -ChildPath "bilete")
                 break
             }
 
@@ -349,7 +363,7 @@ $hjelpGithub
                 break
             }
             if( $l ){
-                (Get-GitMappar) | ForEach-Object { Write-Host "- $_" }
+                (Get-GitMappar) | Sort-Object | ForEach-Object { Write-Host "- $_" }
                 break
             }
             if( $s ){
@@ -377,6 +391,7 @@ $hjelpGithub
                 git add .
                 git commit -m $m 
                 git push 
+                break
             }
             Set-Location (Get-GitHovudmappe)
             break
@@ -441,4 +456,4 @@ $hjelpGithub
             break
         }
     }
-}
+}  
